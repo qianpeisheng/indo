@@ -24,7 +24,7 @@ import datetime
 model_name = 'indobenchmark/indobert-lite-base-p1'
 max_seq_length = 167 # for train and test
 preprocessing_num_workers = 4
-batch_size= 128
+batch_size= 64
 
 # utils
 def get_pos(index1, index2, embedding, cls_):
@@ -325,8 +325,8 @@ dm = Dm()
 lm = My_lm()
 # trainer = pl.Trainer(gpus=1, overfit_batches=1)
 # trainer = pl.Trainer(gpus=1, fast_dev_run=True)# , profiler='simple')
-
-trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
+trainer = pl.Trainer(gpus=1, max_epochs=1, callbacks=[checkpoint_callback])
+# trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
 # trainer = pl.Trainer(gpus=1, max_epochs=100)
 trainer.fit(lm,dm)
 result = trainer.test()
