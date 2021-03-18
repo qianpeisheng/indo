@@ -1,3 +1,4 @@
+
 import os
 import torch
 from datasets import load_dataset
@@ -19,7 +20,7 @@ from tokenizers.pre_tokenizers import Whitespace
 model_name = 'indobenchmark/indobert-lite-base-p1'
 max_seq_length = 167
 preprocessing_num_workers = 4
-batch_size= 16
+batch_size= 128
 
 class IndBert(nn.Module):
     def __init__(self):
@@ -30,11 +31,6 @@ class IndBert(nn.Module):
         self.linear = nn.Linear(in_features=768, out_features=4, bias=True)
         # 4 for poi start and end, street start and end
     def forward(self, input_ids, attention_mask, token_type_ids):
-#         print(input_ids)
-#         print('-------------')
-#         print(attention_mask)
-#         print('......................')
-#         print(token_type_ids)
         out = self.bert(input_ids, attention_mask, token_type_ids)
         out = self.linear(out[0])
         return out
@@ -55,8 +51,6 @@ class My_lm(pl.LightningModule):
     def forward(self, input_ids, attention_mask, token_type_ids):
         # in lightning, forward defines the prediction/inference actions
         embedding = self.model(input_ids, attention_mask, token_type_ids)
-#         print('embedding')
-#         print(embedding)
         return embedding
     
     def reshape_(self, x):
@@ -123,10 +117,7 @@ class My_lm(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         pass
     def configure_optimizers(self):
-        return torch.optim.Adam([p for p in self.parameters() if p.requires_grad], lr=2e-04, eps=1e-08)
-#     def configure_optimizers(self):
-#         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
-#         return optimizer
+        return torch.optim.Adam([p for p in self.parameters() if p.requires_grad], lr=2e-04, eps=1e-08) # check requires grad
 # Which loss fn ?
 
 class Dm(pl.LightningDataModule):
@@ -165,22 +156,21 @@ class Dm(pl.LightningDataModule):
                     return (0, 0) # -1 triggers index out of bound error
             labels = entry['POI/street'].split('/')
             encoded_poi = tokenizer.encode(labels[0])
-        #     print('labels', labels[0])
-        #     print(encoded_poi)
             entry_poi_pos = find_sublist(encoded_poi, encoded)
             encoded_street = tokenizer.encode(labels[1])
             entry_street_pos = find_sublist(encoded_street, encoded)
             return {'POI':entry_poi_pos, 'street': entry_street_pos}
-        datasets = [dataset.map(lambda entries: tokenizer(entries['raw_address'], padding=True), batched=True) for dataset in datasets]
-        tokenized_d_train, tokenized_d_valid = [dataset.map(tokenize_fn) for dataset in datasets]
+        datasets = [dataset.map(lambda entries: tokenizer(entries['raw_address'], padding=True), batched=True, batch_size=batch_size, num_proc=1) for dataset in datasets]
+        tokenized_d_train, tokenized_d_valid = [dataset.map(tokenize_fn, num_proc=preprocessing_num_workers) for dataset in datasets] # attempts to avoid size mismatch 
         self.train_dataset = tokenized_d_train
         self.valid_dataset = tokenized_d_valid
+
       # return the dataloader for each split
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=4)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=1, drop_last=True)
 
     def val_dataloader(self):
-        return DataLoader(self.valid_dataset, batch_size=self.batch_size, num_workers=4)
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size, num_workers=1, drop_last=True)
 
     def test_dataloader(self):
         pass
