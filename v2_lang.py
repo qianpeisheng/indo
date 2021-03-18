@@ -227,7 +227,7 @@ class My_lm(pl.LightningModule):
                     end = min(len(current_input_ids), end)
                     current_ret = tokenizer.decode(current_input_ids[start:end], skip_special_tokens=True)
                 rets.append(current_ret)
-                return rets
+            return rets
         pois = decode_(pred_poi_start, pred_poi_end)
         streets = decode_(pred_street_start, pred_street_end)
         return (pois, streets)
