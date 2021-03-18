@@ -24,7 +24,7 @@ import datetime
 model_name = 'indobenchmark/indobert-lite-base-p1'
 max_seq_length = 167 # for train and test
 preprocessing_num_workers = 4
-batch_size= 64
+batch_size=128 # depend on gpu memory
 
 # utils
 def get_pos(index1, index2, embedding, cls_):
@@ -323,10 +323,21 @@ checkpoint_callback = ModelCheckpoint(
 dm = Dm()
 
 lm = My_lm()
+
+# # debug
 # trainer = pl.Trainer(gpus=1, overfit_batches=1)
 # trainer = pl.Trainer(gpus=1, fast_dev_run=True)# , profiler='simple')
-trainer = pl.Trainer(gpus=1, max_epochs=1, callbacks=[checkpoint_callback])
+# trainer = pl.Trainer(gpus=1, max_epochs=1, callbacks=[checkpoint_callback])
 # trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
-# trainer = pl.Trainer(gpus=1, max_epochs=100)
+
+# standard train, validation and test
+trainer = pl.Trainer(gpus=1, max_epochs=50, callbacks=[checkpoint_callback])
 trainer.fit(lm,dm)
 result = trainer.test()
+
+# # testing only 
+# use larger batch size to speed up testing
+# dm.setup()
+# model = lm.load_from_checkpoint('bert-ind-epoch=00-val_loss=77.79.ckpt')
+# trainer = pl.Trainer(gpus=1)
+# result = trainer.test(model, test_dataloaders=dm.test_dataloader())
