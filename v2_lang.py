@@ -325,8 +325,11 @@ dm = Dm()
 lm = My_lm()
 # trainer = pl.Trainer(gpus=1, overfit_batches=1)
 # trainer = pl.Trainer(gpus=1, fast_dev_run=True)# , profiler='simple')
-
-trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
+trainer = pl.Trainer(gpus=1, max_epochs=1, callbacks=[checkpoint_callback])
+# trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
 # trainer = pl.Trainer(gpus=1, max_epochs=100)
 trainer.fit(lm,dm)
 result = trainer.test()
+
+# test with 1 epoch
+# then test with 100 epochs
