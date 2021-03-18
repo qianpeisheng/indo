@@ -227,7 +227,7 @@ class My_lm(pl.LightningModule):
                     end = min(len(current_input_ids), end)
                     current_ret = tokenizer.decode(current_input_ids[start:end], skip_special_tokens=True)
                 rets.append(current_ret)
-        
+                return rets
         pois = decode_(pred_poi_start, pred_poi_end)
         streets = decode_(pred_street_start, pred_street_end)
         return (pois, streets)
@@ -236,7 +236,7 @@ class My_lm(pl.LightningModule):
         # save file
         answers = []
         for pois, streets in test_outs:
-            for poi, street in zip(pois,streets):
+            for poi, street in zip(pois, streets):
                 answers.append(poi+'/'+street)
         df_answer = pd.DataFrame({'id': range(len(answers)), 'POI/street': answers})
         filename1 = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -299,9 +299,9 @@ class Dm(pl.LightningDataModule):
         self.valid_dataset = tokenized_d_valid
         
         # test dataset
-        test_d = load_dataset('csv', data_files='test.csv')
+        test_d = load_dataset('csv', data_files='test.csv', split='train[:100%]') # adjust the ratio for debugging
         tokenized_d_test = test_d.map(lambda entries: tokenizer(entries['raw_address'], padding=True), batched=True, batch_size=batch_size, num_proc=1)
-        self.test_dataset = tokenized_d_test['train'] # named by the dataset module
+        self.test_dataset = tokenized_d_test# ['train'] # named by the dataset module
         
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=1, drop_last=True)
@@ -325,8 +325,8 @@ dm = Dm()
 lm = My_lm()
 # trainer = pl.Trainer(gpus=1, overfit_batches=1)
 # trainer = pl.Trainer(gpus=1, fast_dev_run=True)# , profiler='simple')
-
-trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
+trainer = pl.Trainer(gpus=1, max_epochs=1, callbacks=[checkpoint_callback])
+# trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
 # trainer = pl.Trainer(gpus=1, max_epochs=100)
 trainer.fit(lm,dm)
 result = trainer.test()
