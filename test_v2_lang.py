@@ -24,7 +24,7 @@ import datetime
 model_name = 'indobenchmark/indobert-lite-base-p1'
 max_seq_length = 167 # for train and test
 preprocessing_num_workers = 4
-batch_size= 128
+batch_size= 2048
 
 # utils
 def get_pos(index1, index2, embedding, cls_):
@@ -261,8 +261,9 @@ class Dm(pl.LightningDataModule):
     def setup(self, stage=None):
         # step is either 'fit', 'validate', 'test', or 'predict'. 90% of the time not relevant
         # load dataset
-        datasets = load_dataset('csv', data_files='train.csv', split=['train[:80%]', 'train[80%:]'])
-        column_names = ['id', 'raw_address', 'POI/street']
+
+        # datasets = load_dataset('csv', data_files='train.csv', split=['train[:80%]', 'train[80%:]'])
+        # column_names = ['id', 'raw_address', 'POI/street']
 
         tokenizer = BertTokenizer.from_pretrained("indobenchmark/indobert-base-p1")
         #pad 0 https://huggingface.co/transformers/model_doc/bert.html
@@ -293,10 +294,10 @@ class Dm(pl.LightningDataModule):
             if labels[1]:
                 cls_label += 2
             return {'POI':entry_poi_pos, 'street': entry_street_pos, 'cls_label': cls_label}
-        datasets = [dataset.map(lambda entries: tokenizer(entries['raw_address'], padding=True), batched=True, batch_size=batch_size, num_proc=1) for dataset in datasets]
-        tokenized_d_train, tokenized_d_valid = [dataset.map(tokenize_fn, num_proc=preprocessing_num_workers) for dataset in datasets] # attempts to avoid size mismatch 
-        self.train_dataset = tokenized_d_train
-        self.valid_dataset = tokenized_d_valid
+        # datasets = [dataset.map(lambda entries: tokenizer(entries['raw_address'], padding=True), batched=True, batch_size=batch_size, num_proc=1) for dataset in datasets]
+        # tokenized_d_train, tokenized_d_valid = [dataset.map(tokenize_fn, num_proc=preprocessing_num_workers) for dataset in datasets] # attempts to avoid size mismatch 
+        # self.train_dataset = tokenized_d_train
+        # self.valid_dataset = tokenized_d_valid
         
         # test dataset
         test_d = load_dataset('csv', data_files='test.csv', split='train[:100%]') # adjust the ratio for debugging
@@ -315,26 +316,18 @@ class Dm(pl.LightningDataModule):
 checkpoint_callback = ModelCheckpoint(
     monitor='val_loss',
     dirpath='.',
-    filename='bert-ind-{epoch:03d}-{val_loss:.2f}',
-    save_top_k=10,
+    filename='bert-ind-{epoch:02d}-{val_loss:.2f}',
+    save_top_k=20,
     mode='min',
 )
 
 dm = Dm()
-# dm.setup()
+dm.setup()
 lm = My_lm()
-# trainer = pl.Trainer(gpus=1, overfit_batches=1)
-# trainer = pl.Trainer(gpus=1, fast_dev_run=True)# , profiler='simple')
-trainer = pl.Trainer(gpus=1, max_epochs=100, callbacks=[checkpoint_callback])
-# trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
-# trainer = pl.Trainer(gpus=1, max_epochs=100)
-trainer.fit(lm,dm)
-result = trainer.test()
 
 # test with 1 epoch
 # then test with 100 epochs
 # or call with pretrained model
-# model = lm.load_from_checkpoint('78/bert-ind-epoch=00-val_loss=78.42.ckpt')
-# checkpoint_callback = ModelCheckpoint(dirpath='78/bert-ind-epoch=00-val_loss=78.42.ckpt')
-# trainer = pl.Trainer(gpus=1)
-# result = trainer.test(model, test_dataloaders=dm.test_dataloader())
+model = lm.load_from_checkpoint('bert-ind-epoch=01-val_loss=73.55.ckpt')
+trainer = pl.Trainer(gpus=1)
+result = trainer.test(model, test_dataloaders=dm.test_dataloader())
