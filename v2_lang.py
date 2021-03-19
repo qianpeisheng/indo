@@ -292,7 +292,19 @@ class Dm(pl.LightningDataModule):
 #                         return i+1, i+len(lst1)+1
                         return i, i+len(lst1) # [TODO] debug on this plus 1 due to splitting [CLS] at start of sequence
                 else:
-                    return (0, 0) # -1 triggers index out of bound error
+                    # find the **similar** sublist, slide and count common items, return the place with most common items
+                    # this method CAN mismatch
+                    num_commons = []
+                    for j in range(len(lst2)-len(lst1)+1):
+                        lst2_part = lst2[j:j+len(lst1)]
+                        temp_sum = sum([1 if lst2_part[k] == lst1[k] else 0 for k in range(len(lst2_part))])
+                        num_commons.append(temp_sum)
+                    if len(num_commons) == 0:
+                        # the lst2 is shorter than lst 1
+                        return(1, len(lst2)-1)
+                    max_ind = num_commons.index(max(num_commons))
+                    return (max_ind, max_ind+len(lst1))
+                    
             labels = entry['POI/street'].split('/')
             encoded_poi = tokenizer.encode(labels[0])
             entry_poi_pos = find_sublist(encoded_poi, encoded)
