@@ -25,6 +25,7 @@ model_name = 'indobenchmark/indobert-lite-base-p1'
 max_seq_length = 167 # for train and test
 preprocessing_num_workers = 4
 batch_size=128 # depend on gpu memory
+test_batch_size=1024 # speed up
 
 # utils
 def get_pos(index1, index2, embedding, cls_):
@@ -167,7 +168,7 @@ class My_lm(pl.LightningModule):
                 street_loss += F.cross_entropy(embedding[index,:,2].unsqueeze(dim=0), street_start[index].unsqueeze(dim=0))
                 street_loss += F.cross_entropy(embedding[index,:,3].unsqueeze(dim=0), street_end[index].unsqueeze(dim=0))
 
-        total_loss = cls_loss + poi_loss + street_loss     
+        total_loss = (cls_loss + poi_loss + street_loss)/3 # same as train loss     
 
         # acc
         _, cls_ = torch.max(out_cls, dim=1)
@@ -177,13 +178,14 @@ class My_lm(pl.LightningModule):
         def get_acc(pred, gt):
             return torch.tensor(accuracy_score(pred.cpu(), gt.cpu()))
         val_accs = [get_acc(pred_poi_start, poi_start), get_acc(pred_poi_end, poi_end), get_acc(pred_street_start, street_start), get_acc(pred_street_end, street_end)]
-        
+        avg_acc = sum(val_accs)/len(val_accs)
         self.log('val_loss', total_loss, on_step=True)
         self.log('poi_start', val_accs[0], on_step=True)
         self.log('poi_end', val_accs[1], on_step=True)
         self.log('street_start', val_accs[2], on_step=True)
         self.log('street_end', val_accs[3], on_step=True)
-        return {'val_loss': total_loss, 'poi_start': val_accs[0], 'poi_end': val_accs[1], 'street_start': val_accs[2], 'street_end': val_accs[3]}
+        self.log('avg_acc', avg_acc, on_step=True)
+        return {'val_loss': total_loss, 'poi_start': val_accs[0], 'poi_end': val_accs[1], 'street_start': val_accs[2], 'street_end': val_accs[3], 'avg_acc':avg_acc}
         # may use F1 to measure the performance
     
     def validation_epoch_end(self, valid_step_outs):
@@ -195,12 +197,20 @@ class My_lm(pl.LightningModule):
             epoch_accs[1] += d['poi_end']
             epoch_accs[2] += d['street_start']
             epoch_accs[3] += d['street_end']
-        self.log('val_loss', epoch_val_loss/len(valid_step_outs), on_epoch=True, prog_bar=True)
-        self.log('poi_start', epoch_accs[0]/len(valid_step_outs), on_epoch=True, prog_bar=True)
-        self.log('poi_end', epoch_accs[1]/len(valid_step_outs), on_epoch=True, prog_bar=True)
-        self.log('street_start', epoch_accs[2]/len(valid_step_outs), on_epoch=True, prog_bar=True)
-        self.log('street_end', epoch_accs[3]/len(valid_step_outs), on_epoch=True, prog_bar=True)
-        
+        val_loss = epoch_val_loss/len(valid_step_outs)
+        avg_p_s = epoch_accs[0]/len(valid_step_outs)
+        avg_p_e = epoch_accs[1]/len(valid_step_outs)
+        avg_s_s = epoch_accs[2]/len(valid_step_outs)
+        avg_s_e = epoch_accs[3]/len(valid_step_outs)
+        avg_acc = sum([avg_p_s, avg_p_e, avg_s_s, avg_s_e])/4
+        self.log('val_loss', val_loss, on_epoch=True, prog_bar=True)
+        self.log('poi_start', avg_p_s, on_epoch=True, prog_bar=True)
+        self.log('poi_end', avg_p_e, on_epoch=True, prog_bar=True)
+        self.log('street_start', avg_s_s, on_epoch=True, prog_bar=True)
+        self.log('street_end', avg_s_e, on_epoch=True, prog_bar=True)
+        self.log('avg_acc', avg_acc, on_epoch=True)
+        return {'val_loss': val_loss, 'poi_start': avg_p_s, 'poi_end': avg_p_e, 'street_start': avg_s_s, 'street_end': avg_s_e, 'avg_acc':avg_acc}
+
     def test_step(self, batch, batch_idx):
         # batch
         input_ids = batch['input_ids']
@@ -225,7 +235,8 @@ class My_lm(pl.LightningModule):
                 # Note that decoder skips special tokens, so end may > len(input_ids)
                     current_input_ids = input_ids[index]
                     end = min(len(current_input_ids), end)
-                    current_ret = tokenizer.decode(current_input_ids[start:end], skip_special_tokens=True)
+                    current_ret = tokenizer.decode(current_input_ids[start+1:end+1], skip_special_tokens=True)
+                    # NOTE [IMPORTANT] This +1 is the key to raise score from 0.01 to 0.5x
                 rets.append(current_ret)
             return rets
         pois = decode_(pred_poi_start, pred_poi_end)
@@ -261,7 +272,7 @@ class Dm(pl.LightningDataModule):
     def setup(self, stage=None):
         # step is either 'fit', 'validate', 'test', or 'predict'. 90% of the time not relevant
         # load dataset
-        datasets = load_dataset('csv', data_files='train.csv', split=['train[:80%]', 'train[80%:]'])
+        datasets = load_dataset('csv', data_files='train.csv', split=['train[:100%]', 'train[80%:]']) # use all training data to prepare for final submission
         column_names = ['id', 'raw_address', 'POI/street']
 
         tokenizer = BertTokenizer.from_pretrained("indobenchmark/indobert-base-p1")
@@ -300,58 +311,44 @@ class Dm(pl.LightningDataModule):
         
         # test dataset
         test_d = load_dataset('csv', data_files='test.csv', split='train[:100%]') # adjust the ratio for debugging
-        tokenized_d_test = test_d.map(lambda entries: tokenizer(entries['raw_address'], padding=True), batched=True, batch_size=batch_size, num_proc=1)
+        tokenized_d_test = test_d.map(lambda entries: tokenizer(entries['raw_address'], padding=True), batched=True, batch_size=test_batch_size, num_proc=1)
         self.test_dataset = tokenized_d_test# ['train'] # named by the dataset module
         
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=1, drop_last=True)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=1)
 
     def val_dataloader(self):
-        return DataLoader(self.valid_dataset, batch_size=self.batch_size, num_workers=1, drop_last=True)
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size, num_workers=1)
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=1)
+        return DataLoader(self.test_dataset, batch_size=test_batch_size, num_workers=1)
 
 checkpoint_callback = ModelCheckpoint(
-    monitor='val_loss',
+    # monitor='val_loss',
+    monitor='avg_acc',
     dirpath='.',
     filename='bert-ind-{epoch:03d}-{val_loss:.2f}',
-    save_top_k=10,
-    mode='min',
+    save_top_k=100,
+    mode='max',
 )
 
 dm = Dm()
-# dm.setup()
 lm = My_lm()
 
 # # debug
 # trainer = pl.Trainer(gpus=1, overfit_batches=1)
 # trainer = pl.Trainer(gpus=1, fast_dev_run=True)# , profiler='simple')
-<<<<<<< HEAD
-trainer = pl.Trainer(gpus=1, max_epochs=100, callbacks=[checkpoint_callback])
-=======
 # trainer = pl.Trainer(gpus=1, max_epochs=1, callbacks=[checkpoint_callback])
->>>>>>> 4383185f9c726210a82f321ac60c8f4c61a5d003
 # trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
 
 # standard train, validation and test
-trainer = pl.Trainer(gpus=1, max_epochs=50, callbacks=[checkpoint_callback])
+trainer = pl.Trainer(gpus=1, max_epochs=100, callbacks=[checkpoint_callback])
 trainer.fit(lm,dm)
 result = trainer.test()
 
-<<<<<<< HEAD
-# test with 1 epoch
-# then test with 100 epochs
-# or call with pretrained model
-# model = lm.load_from_checkpoint('78/bert-ind-epoch=00-val_loss=78.42.ckpt')
-# checkpoint_callback = ModelCheckpoint(dirpath='78/bert-ind-epoch=00-val_loss=78.42.ckpt')
-# trainer = pl.Trainer(gpus=1)
-# result = trainer.test(model, test_dataloaders=dm.test_dataloader())
-=======
 # # testing only 
 # use larger batch size to speed up testing
 # dm.setup()
 # model = lm.load_from_checkpoint('bert-ind-epoch=00-val_loss=77.79.ckpt')
 # trainer = pl.Trainer(gpus=1)
 # result = trainer.test(model, test_dataloaders=dm.test_dataloader())
->>>>>>> 4383185f9c726210a82f321ac60c8f4c61a5d003

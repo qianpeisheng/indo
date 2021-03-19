@@ -225,7 +225,8 @@ class My_lm(pl.LightningModule):
                 # Note that decoder skips special tokens, so end may > len(input_ids)
                     current_input_ids = input_ids[index]
                     end = min(len(current_input_ids), end)
-                    current_ret = tokenizer.decode(current_input_ids[start:end], skip_special_tokens=True)
+                    current_ret = tokenizer.decode(current_input_ids[start+1:end+1], skip_special_tokens=True)
+                    # NOTE [IMPORTANT] This +1 is the key to raise score from 0.01 to 0.5x
                 rets.append(current_ret)
             return rets
         pois = decode_(pred_poi_start, pred_poi_end)
@@ -325,9 +326,6 @@ dm = Dm()
 dm.setup()
 lm = My_lm()
 
-# test with 1 epoch
-# then test with 100 epochs
-# or call with pretrained model
 model = lm.load_from_checkpoint('bert-ind-epoch=01-val_loss=73.55.ckpt')
 trainer = pl.Trainer(gpus=1)
 result = trainer.test(model, test_dataloaders=dm.test_dataloader())
