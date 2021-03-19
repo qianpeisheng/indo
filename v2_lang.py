@@ -27,6 +27,8 @@ preprocessing_num_workers = 4
 batch_size=128 # depend on gpu memory
 test_batch_size=1024 # speed up
 
+tokenizer = BertTokenizer.from_pretrained(model_name) # make this global
+
 # utils
 def get_pos(index1, index2, embedding, cls_):
     val1, pos1 = torch.max(embedding[:,:,index1], dim=1)
@@ -47,7 +49,8 @@ class IndBert(nn.Module):
     def __init__(self):
         super(IndBert, self).__init__()
         model = AutoModel.from_pretrained(model_name)
-        model.resize_token_embeddings(30521)
+        # model.resize_token_embeddings(30521)
+        model.resize_token_embeddings(len(tokenizer))
 # https://github.com/huggingface/transformers/issues/4153
         self.bert = model
         self.linear = nn.Linear(in_features=768, out_features=4, bias=True)
@@ -224,7 +227,7 @@ class My_lm(pl.LightningModule):
         _, cls_ = torch.max(out_cls, dim=1)
         pred_poi_start, pred_poi_end = get_pos(0,1, embedding, cls_)
         pred_street_start, pred_street_end = get_pos(2,3, embedding, cls_)
-        tokenizer = BertTokenizer.from_pretrained("indobenchmark/indobert-base-p1") # make this global
+        tokenizer = BertTokenizer.from_pretrained(model_name) # make this global
         def decode_(pred_start, pred_end):   
             rets = []
             for index, (start, end) in enumerate(zip(pred_start, pred_end)):
@@ -261,9 +264,9 @@ class My_lm(pl.LightningModule):
 class Dm(pl.LightningDataModule):
     def __init__(self, batch_size=batch_size):
         super().__init__()
-        self.train_file = 'train.csv'
-        self.valid_file = 'train.csv'
-        self.test_file = 'test.csv'
+        self.train_file = 'new_train_2.csv'
+        self.valid_file = 'new_train_2.csv'
+        self.test_file = 'new_test_2.csv'
         self.batch_size = batch_size
       # When doing distributed training, Datamodules have two optional arguments for
       # granular control over download/prepare/splitting data:            
@@ -272,10 +275,10 @@ class Dm(pl.LightningDataModule):
     def setup(self, stage=None):
         # step is either 'fit', 'validate', 'test', or 'predict'. 90% of the time not relevant
         # load dataset
-        datasets = load_dataset('csv', data_files='train.csv', split=['train[:100%]', 'train[80%:]']) # use all training data to prepare for final submission
+        datasets = load_dataset('csv', data_files=self.train_file, split=['train[:100%]', 'train[80%:]']) # use all training data to prepare for final submission
         column_names = ['id', 'raw_address', 'POI/street']
 
-        tokenizer = BertTokenizer.from_pretrained("indobenchmark/indobert-base-p1")
+        tokenizer = BertTokenizer.from_pretrained(model_name)
         #pad 0 https://huggingface.co/transformers/model_doc/bert.html
 
         def tokenize_fn(entry):
@@ -322,7 +325,7 @@ class Dm(pl.LightningDataModule):
         self.valid_dataset = tokenized_d_valid
         
         # test dataset
-        test_d = load_dataset('csv', data_files='test.csv', split='train[:100%]') # adjust the ratio for debugging
+        test_d = load_dataset('csv', data_files=self.test_file, split='train[:100%]') # adjust the ratio for debugging
         tokenized_d_test = test_d.map(lambda entries: tokenizer(entries['raw_address'], padding=True), batched=True, batch_size=test_batch_size, num_proc=1)
         self.test_dataset = tokenized_d_test# ['train'] # named by the dataset module
         
@@ -338,8 +341,8 @@ class Dm(pl.LightningDataModule):
 checkpoint_callback = ModelCheckpoint(
     # monitor='val_loss',
     monitor='avg_acc',
-    dirpath='.',
-    filename='bert-ind-{epoch:03d}-{val_loss:.2f}',
+    dirpath='./exp1/',
+    filename='bert-ind-{epoch:03d}-{val_loss:.3f}-{avg_acc:.3f}',
     save_top_k=100,
     mode='max',
 )
@@ -354,7 +357,7 @@ lm = My_lm()
 # trainer = pl.Trainer(gpus=1, max_epochs=10, limit_train_batches=10, limit_val_batches=3, callbacks=[checkpoint_callback])
 
 # standard train, validation and test
-trainer = pl.Trainer(gpus=1, max_epochs=100, callbacks=[checkpoint_callback])
+trainer = pl.Trainer(gpus=1, max_epochs=100, callbacks=[checkpoint_callback], stochastic_weight_avg=True, gradient_clip_val=1)
 trainer.fit(lm,dm)
 result = trainer.test()
 
