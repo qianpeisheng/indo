@@ -1,9 +1,5 @@
 #!/usr/bin/env python
 # coding: utf-8
-
-# In[1]:
-
-
 import os
 import torch
 from datasets import load_dataset
@@ -26,20 +22,12 @@ from tokenizers.pre_tokenizers import Whitespace
 import pandas as pd
 import datetime
 
-
-# In[2]:
-
-
 # Configs
 model_name = 'indolem/indobert-base-uncased'#'indobenchmark/indobert-lite-base-p1'
 max_seq_length = 167 # for train and test
 preprocessing_num_workers = 4
-batch_size= 16
+batch_size= 128
 tokenizer = BertTokenizer.from_pretrained(model_name)
-
-
-# In[3]:
-
 
 # out[0] **is** out.last_hidden_state
 class SCBert(nn.Module):
@@ -155,10 +143,6 @@ class My_lm(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=3e-05, eps=1e-08) # check requires grad
         # Not pretrained in some layers!
 
-
-# In[4]:
-
-
 class Dm(pl.LightningDataModule):
     def __init__(self, batch_size=batch_size):
         super().__init__()
@@ -172,12 +156,10 @@ class Dm(pl.LightningDataModule):
       # OPTIONAL, called for every GPU/machine (assigning state is OK)
     def setup(self, stage=None):
         # step is either 'fit', 'validate', 'test', or 'predict'. 90% of the time not relevant
-        datasets = load_dataset('csv', data_files='sc.csv', split=['train[:5%]', 'train[5%:10%]'])
+        datasets = load_dataset('csv', data_files='sc.csv', split=['train[:100%]', 'train[80%:]'])
 
         #pad 0 https://huggingface.co/transformers/model_doc/bert.html
         def add_decoder_id(entry):
-#             print(len(entry['input_ids']))
-#             print(len(entry['attention_mask']))
             return {'decoder_ids': entry['input_ids'], 'decoder_attention_mask': entry['attention_mask']}
 
         datasets = [dataset.map(lambda entries: tokenizer(['nan' if not d else d for d in entries['label']], padding=True), batched=True, batch_size=batch_size,) for dataset in datasets]
@@ -198,51 +180,24 @@ class Dm(pl.LightningDataModule):
 #         return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=1)
         pass
 
-
-# In[5]:
-
-
 checkpoint_callback = ModelCheckpoint(
     monitor='val_loss',
-    dirpath='.',
-    filename='bert-ind-{epoch:02d}-{val_loss:.2f}',
-    save_top_k=2,
+    dirpath='./sc/',
+    filename='bert-ind-{epoch:03d}-{val_loss:.3f}',
+    save_top_k=100,
     mode='min',
 )
 
 dm = Dm()
 
 lm = My_lm()
-trainer = pl.Trainer(gpus=1, overfit_batches=1)
+# trainer = pl.Trainer(gpus=1, overfit_batches=1)
 # trainer = pl.Trainer(gpus=1, fast_dev_run=True)# , profiler='simple')
-
+trainer = pl.Trainer(gpus=1, max_epochs=100, callbacks=[checkpoint_callback], stochastic_weight_avg=True, gradient_clip_val=1)
 # trainer = pl.Trainer(gpus=1, max_epochs=2, limit_train_batches=100, limit_val_batches=30, callbacks=[checkpoint_callback])
 # trainer = pl.Trainer(gpus=1, max_epochs=100)
 trainer.fit(lm,dm)
 # result = trainer.test()
-
-
-# In[6]:
-
-
-# dm.setup()
-# x = dm.train_dataloader()
-
-
-# In[7]:
-
-
-# it = iter(x)
-# first = next(it)
-
-
-# In[8]:
-
-
-len(dm.train_dataset[6]['input_ids'])
-
-
-# In[ ]:
 
 
 
