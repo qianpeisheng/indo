@@ -21,7 +21,7 @@ import pandas as pd
 import datetime
 
 # Configs
-model_name = 'indobenchmark/indobert-lite-base-p1'
+model_name = "indolem/indobert-base-uncased" #'indobenchmark/indobert-lite-base-p1'
 max_seq_length = 167 # for train and test
 preprocessing_num_workers = 4
 batch_size=128 # depend on gpu memory
