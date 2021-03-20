@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader, random_split #  AutoTokenizer
 from torchvision import transforms
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
+from collections import Counter
 
 import gzip
 import csv
@@ -24,7 +25,7 @@ import datetime
 model_name = "indolem/indobert-base-uncased" #'indobenchmark/indobert-lite-base-p1'
 max_seq_length = 167 # for train and test
 preprocessing_num_workers = 4
-batch_size=128 # depend on gpu memory
+batch_size=256 # depend on gpu memory
 test_batch_size=1024 # speed up
 
 tokenizer = BertTokenizer.from_pretrained(model_name) # make this global
@@ -286,27 +287,79 @@ class Dm(pl.LightningDataModule):
 
             # also handle the labels here
             def find_sublist(lst1, lst2):
+                # lst1 is label, lst2 is raw address
                 lst1 = lst1[1:len(lst1)-1]
                 lst2 = lst2[1:len(lst2)-1]
                 if len(lst1) == 0 or len(lst2) == 0:
                     return (0, 0)
                 for i in range(len(lst2)-len(lst1)+1):
                     if lst2[i:i+len(lst1)] == lst1:
+                        # exact match
 #                         return i+1, i+len(lst1)+1
                         return i, i+len(lst1) # [TODO] debug on this plus 1 due to splitting [CLS] at start of sequence
                 else:
-                    # find the **similar** sublist, slide and count common items, return the place with most common items
-                    # this method CAN mismatch
-                    num_commons = []
-                    for j in range(len(lst2)-len(lst1)+1):
-                        lst2_part = lst2[j:j+len(lst1)]
-                        temp_sum = sum([1 if lst2_part[k] == lst1[k] else 0 for k in range(len(lst2_part))])
-                        num_commons.append(temp_sum)
-                    if len(num_commons) == 0:
-                        # the lst2 is shorter than lst 1
-                        return(1, len(lst2)-1)
-                    max_ind = num_commons.index(max(num_commons))
-                    return (max_ind, max_ind+len(lst1))
+                    # estimated match
+                    def refine_lbl(seq1, seq2):
+                        # seq 1 is the label, seq2 is the proposed match which may have extras at the start
+                        offset = 0
+                        s1_start = tokenizer.decode(seq1[0])
+                        for s2 in seq2:
+                            s2_dec = tokenizer.decode(s2)
+                            if s2_dec not in s1_start:
+                                offset += 1
+                            else:
+                                return offset
+                        return len(seq2)
+                    def max_match(lst1, lst2):
+                        start = 0
+                        end = 0
+                        # first, find max match sliding list1 on list2
+                        matches = []
+                        if len(lst2) > len(lst1):
+                            for i in range(len(lst2) - len(lst1) + 1):
+                                lst2_part = lst2[i:i+len(lst1)]
+                                c = list((Counter(lst2_part) & Counter(lst1)).elements())
+                                matches.append(len(c))
+                        else:
+                            return 0, len(lst2) # lst 2 is shorter than lst1
+                        max_match = matches.index(max(matches))
+                        start = max_match
+                        end = max_match + len(lst1)
+                        if end > len(lst2):
+                            end = len(lst2)
+                            start = end - len(lst1)
+
+                        offset = refine_lbl(lst1, lst2[start:end])
+                        start = start + offset
+
+                        # validity check
+                        if start < 0:
+                            start = 0
+                        if start >= len(lst2):
+                            start = len(lst2) -1
+                        if end < 0:
+                            end = 0
+                        if end > len(lst2):
+                            end = len(lst2) - 1
+                        if start > end:
+                            temp = end
+                            end = start
+                            start = end
+                        return start, end
+                    
+                    return max_match(lst1, lst2)
+                    # # find the **similar** sublist, slide and count common items, return the place with most common items
+                    # # this method CAN mismatch
+                    # num_commons = []
+                    # for j in range(len(lst2)-len(lst1)+1):
+                    #     lst2_part = lst2[j:j+len(lst1)]
+                    #     temp_sum = sum([1 if lst2_part[k] == lst1[k] else 0 for k in range(len(lst2_part))])
+                    #     num_commons.append(temp_sum)
+                    # if len(num_commons) == 0:
+                    #     # the lst2 is shorter than lst 1
+                    #     return(1, len(lst2)-1)
+                    # max_ind = num_commons.index(max(num_commons))
+                    # return (max_ind, max_ind+len(lst1))
                     
             labels = entry['POI/street'].split('/')
             encoded_poi = tokenizer.encode(labels[0])
@@ -341,7 +394,7 @@ class Dm(pl.LightningDataModule):
 checkpoint_callback = ModelCheckpoint(
     # monitor='val_loss',
     monitor='avg_acc',
-    dirpath='./exp1/',
+    dirpath='./exp2/',
     filename='bert-ind-{epoch:03d}-{val_loss:.3f}-{avg_acc:.3f}',
     save_top_k=100,
     mode='max',
