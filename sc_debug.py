@@ -146,9 +146,9 @@ class My_lm(pl.LightningModule):
 class Dm(pl.LightningDataModule):
     def __init__(self, batch_size=batch_size):
         super().__init__()
-        self.train_file = 'sc.csv'
-        self.valid_file = 'sc.csv'
-        self.test_file = 'sc.csv'
+        self.train_file = 'new_sc.csv'
+        self.valid_file = 'new_sc.csv'
+        self.test_file = 'new_sc.csv'
         self.batch_size = batch_size
       # When doing distributed training, Datamodules have two optional arguments for
       # granular control over download/prepare/splitting data:            
@@ -156,7 +156,7 @@ class Dm(pl.LightningDataModule):
       # OPTIONAL, called for every GPU/machine (assigning state is OK)
     def setup(self, stage=None):
         # step is either 'fit', 'validate', 'test', or 'predict'. 90% of the time not relevant
-        datasets = load_dataset('csv', data_files='sc.csv', split=['train[:100%]', 'train[80%:]'])
+        datasets = load_dataset('csv', data_files=self.train_file, split=['train[:100%]', 'train[80%:]'])
 
         #pad 0 https://huggingface.co/transformers/model_doc/bert.html
         def add_decoder_id(entry):
@@ -182,7 +182,7 @@ class Dm(pl.LightningDataModule):
 
 checkpoint_callback = ModelCheckpoint(
     monitor='val_loss',
-    dirpath='./sc/',
+    dirpath='./new_sc/',
     filename='bert-ind-{epoch:03d}-{val_loss:.3f}',
     save_top_k=100,
     mode='min',
